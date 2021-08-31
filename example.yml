@@ -1,0 +1,27 @@
+tree: myana/mytree
+eras:
+  HL-LHC:
+    luminosity: 3000000 # 1/pb
+samples:
+  GluGluToHHTo2B2G_node_cHHH0_TuneCP5_14TeV-powheg-pythia8_200PU:
+    era: HL-LHC
+    type: signal
+    files:
+      - root://se01.indiacms.res.in//cms/store/group/Snowmass_2021_2022/DelphesNtuplizer/GluGluToHHTo2B2G_node_cHHH0_TuneCP5_14TeV-powheg-pythia8_200PU/GluGluToHHTo2B2G_node_cHHH0_TuneCP5_14TeV-powheg-pythia8_ntuple_78_1.root                                            
+    generated-events: sumgenweight
+    cross-section: 1
+    legend: HH -> BBGG
+    line-color: "#D489FF" # lightpurple
+plotIt:
+  configuration:
+    width: 700
+    height: 600
+    luminosity-label: '%1$.2f fb^{-1} (13 TeV)'
+    experiment: CMS
+    extra-label: HL-LHC
+    luminosity-error: 0.025
+    show-overflow: true
+  plotdefaults:
+    log-y: true
+  legend:
+    position: [0.7, 0.8, 0.91, 0.91]
