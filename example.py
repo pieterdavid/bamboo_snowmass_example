@@ -44,6 +44,8 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
         from bamboo.plots import EquidistantBinning as EqB
         from bamboo import treefunctions as op
 
+        noSel = noSel.refine("withgenweight", weight=t.genweight)
+
         plots = []
 
         electrons = op.select(t.elec, lambda el : op.AND(
@@ -54,5 +56,20 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
         hasTwoEl = noSel.refine("hasElEl", cut=(op.rng_len(electrons) >= 2))
 
         plots.append(Plot.make1D("2El_nJets", op.rng_len(t.jetpuppi), hasTwoEl, EqB(10, 0., 10.), title="nJets"))
+
+        if False:
+            # this needs "pip install --upgrade 'git+https://gitlab.cern.ch/cp3-cms/bamboo.git@refs/merge-requests/196/head#egg=bamboo' "
+            # until https://gitlab.cern.ch/cp3-cms/bamboo/-/merge_requests/196 is merged (so disabled by default)
+            from bamboo.plots import Skim
+            plots.append(Skim("allevts", {
+                "weight": noSel.weight,
+                "nElectrons": op.rng_len(electrons),
+                "El_pt": op.map(electrons, lambda el : el.pt)
+                }, noSel))
+
+        yields = CutFlowReport("yields")
+        plots.append(yields)
+        yields.add(noSel, "Produced")
+        yields.add(hasTwoEl, "2 electrons")
 
         return plots
