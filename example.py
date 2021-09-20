@@ -5,6 +5,8 @@
 #############################################################################
 
 from bamboo.analysismodules import AnalysisModule, HistogramsModule
+import logging
+logger = logging.getLogger(__name__)
 
 class CMSPhase2SimRTBModule(AnalysisModule):
     """ Base module for processing Phase2 flat trees """
@@ -39,6 +41,10 @@ class CMSPhase2SimRTBHistoModule(CMSPhase2SimRTBModule, HistogramsModule):
 ################################
 
 class SnowmassExample(CMSPhase2SimRTBHistoModule):
+    def addArgs(self, parser):
+        super().addArgs(parser)
+        parser.add_argument("--mvaSkim", action="store_true", help="Produce MVA training skims")
+
     def definePlots(self, t, noSel, sample=None, sampleCfg=None):
         from bamboo.plots import Plot, CutFlowReport
         from bamboo.plots import EquidistantBinning as EqB
@@ -57,14 +63,12 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
 
         plots.append(Plot.make1D("2El_nJets", op.rng_len(t.jetpuppi), hasTwoEl, EqB(10, 0., 10.), title="nJets"))
 
-        if False:
-            # this needs "pip install --upgrade 'git+https://gitlab.cern.ch/cp3-cms/bamboo.git@refs/merge-requests/196/head#egg=bamboo' "
-            # until https://gitlab.cern.ch/cp3-cms/bamboo/-/merge_requests/196 is merged (so disabled by default)
+        if self.args.mvaSkim:
             from bamboo.plots import Skim
             plots.append(Skim("allevts", {
                 "weight": noSel.weight,
                 "nElectrons": op.rng_len(electrons),
-                "El_pt": op.map(electrons, lambda el : el.pt)
+                #"El_pt": op.map(electrons, lambda el : el.pt)
                 }, noSel))
 
         yields = CutFlowReport("yields")
@@ -73,3 +77,46 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
         yields.add(hasTwoEl, "2 electrons")
 
         return plots
+
+    def postProcess(self, taskList, config=None, workdir=None, resultsdir=None):
+        super().postProcess(taskList, config=config, workdir=workdir, resultsdir=resultsdir)
+        import os.path
+        from bamboo.plots import Skim
+        skims = [ap for ap in self.plotList if isinstance(ap, Skim)]
+        if self.args.mvaSkim and skims:
+            # Calculate the scale for each sample
+            lumiPerEra = {era: eraCfg["luminosity"] for era, eraCfg in config["eras"].items()}
+            filesAndNorms = {}
+            from bamboo.root import gbl
+            for smpNm, smpCfg in config["samples"].items():
+                resF = gbl.TFile.Open(os.path.join(resultsdir, f"{smpNm}.root"))
+                genEvts = None
+                if "generated-events" in smpCfg:
+                    if isinstance(smpCfg["generated-events"], str):
+                        genEvts = self.readCounters(resF)[smpCfg["generated-events"]]
+                    else:
+                        genEvts = smpCfg["generated-events"]
+                norm = (lumiPerEra[smpCfg["era"]]
+                       * smpCfg.get("cross-section", 1.)
+                       * smpCfg.get("branching-ration", 1.)
+                       / genEvts)
+                filesAndNorms[smpNm] = (resF, norm)
+            try:
+                import pandas as pd
+                for skim in skims:
+                    # Read and scale results for all samples, and save the dataframe
+                    frames = []
+                    for smpNm,(resF, norm) in filesAndNorms.items():
+                        cols = gbl.ROOT.RDataFrame(resF.Get(skim.treeName)).AsNumpy()
+                        cols["weight"] *= norm
+                        proc = config["samples"][smpNm].get("group", smpNm)
+                        cols["process"] = [proc]*len(cols["weight"])
+                        frames.append(pd.DataFrame(cols))
+                    df = pd.concat(frames)
+                    categoriess = set(df["process"])
+                    df["process"] = pd.Categorical(df["process"], categories=list(categoriess), ordered=False)
+                    pqoutname = os.path.join(resultsdir, f"{skim.name}.parquet")
+                    df.to_parquet(pqoutname)
+                    logger.info(f"Dataframe for skim {skim.name} saved to {pqoutname}")
+            except ImportError as ex:
+                logger.error("Could not import pandas, no dataframes will be saved")
