@@ -84,37 +84,21 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
         from bamboo.plots import Skim
         skims = [ap for ap in self.plotList if isinstance(ap, Skim)]
         if self.args.mvaSkim and skims:
-            # Calculate the scale for each sample
-            lumiPerEra = {era: eraCfg["luminosity"] for era, eraCfg in config["eras"].items()}
-            filesAndNorms = {}
-            from bamboo.root import gbl
-            for smpNm, smpCfg in config["samples"].items():
-                resF = gbl.TFile.Open(os.path.join(resultsdir, f"{smpNm}.root"))
-                genEvts = None
-                if "generated-events" in smpCfg:
-                    if isinstance(smpCfg["generated-events"], str):
-                        genEvts = self.readCounters(resF)[smpCfg["generated-events"]]
-                    else:
-                        genEvts = smpCfg["generated-events"]
-                norm = (lumiPerEra[smpCfg["era"]]
-                       * smpCfg.get("cross-section", 1.)
-                       * smpCfg.get("branching-ration", 1.)
-                       / genEvts)
-                filesAndNorms[smpNm] = (resF, norm)
+            from bamboo.analysisutils import loadPlotIt
+            p_config, samples, _, systematics, legend = loadPlotIt(config, [], eras=self.args.eras[1], workdir=workdir, resultsdir=resultsdir, readCounters=self.readCounters, vetoFileAttributes=self.__class__.CustomSampleAttributes)
             try:
+                from bamboo.root import gbl
                 import pandas as pd
                 for skim in skims:
-                    # Read and scale results for all samples, and save the dataframe
                     frames = []
-                    for smpNm,(resF, norm) in filesAndNorms.items():
-                        cols = gbl.ROOT.RDataFrame(resF.Get(skim.treeName)).AsNumpy()
-                        cols["weight"] *= norm
-                        proc = config["samples"][smpNm].get("group", smpNm)
-                        cols["process"] = [proc]*len(cols["weight"])
-                        frames.append(pd.DataFrame(cols))
+                    for smp in samples:
+                        for cb in (smp.files if hasattr(smp, "files") else [smp]):  # could be a helper in plotit
+                            cols = gbl.ROOT.RDataFrame(cb.tFile.Get(skim.treeName)).AsNumpy()
+                            cols["weight"] *= cb.scale
+                            cols["process"] = [smp.name]*len(cols["weight"])
+                            frames.append(pd.DataFrame(cols))
                     df = pd.concat(frames)
-                    categoriess = set(df["process"])
-                    df["process"] = pd.Categorical(df["process"], categories=list(categoriess), ordered=False)
+                    df["process"] = pd.Categorical(df["process"], categories=pd.unique(df["process"]), ordered=False)
                     pqoutname = os.path.join(resultsdir, f"{skim.name}.parquet")
                     df.to_parquet(pqoutname)
                     logger.info(f"Dataframe for skim {skim.name} saved to {pqoutname}")
