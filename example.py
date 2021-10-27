@@ -44,6 +44,7 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
     def addArgs(self, parser):
         super().addArgs(parser)
         parser.add_argument("--mvaSkim", action="store_true", help="Produce MVA training skims")
+        parser.add_argument("--datacards", action="store_true", help="Produce histograms for datacards")
 
     def definePlots(self, t, noSel, sample=None, sampleCfg=None):
         from bamboo.plots import Plot, CutFlowReport
@@ -83,9 +84,11 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
         import os.path
         from bamboo.plots import Skim
         skims = [ap for ap in self.plotList if isinstance(ap, Skim)]
+        from bamboo.analysisutils import loadPlotIt
         if self.args.mvaSkim and skims:
-            from bamboo.analysisutils import loadPlotIt
-            p_config, samples, _, systematics, legend = loadPlotIt(config, [], eras=self.args.eras[1], workdir=workdir, resultsdir=resultsdir, readCounters=self.readCounters, vetoFileAttributes=self.__class__.CustomSampleAttributes)
+            p_config, samples, _, systematics, legend = loadPlotIt(
+                config, [], eras=self.args.eras[1], workdir=workdir, resultsdir=resultsdir,
+                readCounters=self.readCounters, vetoFileAttributes=self.__class__.CustomSampleAttributes)
             try:
                 from bamboo.root import gbl
                 import pandas as pd
@@ -104,3 +107,35 @@ class SnowmassExample(CMSPhase2SimRTBHistoModule):
                     logger.info(f"Dataframe for skim {skim.name} saved to {pqoutname}")
             except ImportError as ex:
                 logger.error("Could not import pandas, no dataframes will be saved")
+        if self.args.datacards:
+            # the code below will produce histograms "with datacard conventions":
+            # - scaled with lumi and cross-section
+            # - "region.root:/h_process"
+            # in practice shape systematics and renamings/regroupings may be needed,
+            # see https://gitlab.cern.ch/piedavid/cms-ttw-run2legacy/-/blob/bamboo/ttW/datacards.py
+            # for an example with a number of such things implemented
+            datacardPlots = [ap for ap in self.plotList if ap.name =="2El_nJets"]
+            p_config, samples, plots_dc, systematics, legend = loadPlotIt(
+                config, datacardPlots, eras=self.args.eras[1], workdir=workdir, resultsdir=resultsdir,
+                readCounters=self.readCounters, vetoFileAttributes=self.__class__.CustomSampleAttributes)
+            dcdir = os.path.join(workdir, "datacard_histograms")
+            import os
+            os.makedirs(dcdir, exist_ok=True)
+            def _saveHist(obj, name, tdir=None):
+                if tdir:
+                    tdir.cd()
+                obj.Write(name)
+            from functools import partial
+            import plotit.systematics
+            from bamboo.root import gbl
+            for plot in plots_dc:
+                for era in (self.args.eras[1] or config["eras"].keys()):
+                    f_dch = gbl.TFile.Open(os.path.join(dcdir, f"{plot.name}_{era}.root"), "RECREATE")
+                    saveHist = partial(_saveHist, tdir=f_dch)
+                    for smp in samples:
+                        smpName = smp.name
+                        if smpName.endswith(".root"):
+                            smpName = smpName[:-5]
+                        h = smp.getHist(plot, eras=era)
+                        saveHist(h.obj, f"h_{smpName}")
+                    f_dch.Close()
